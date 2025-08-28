@@ -1,0 +1,64 @@
+name: Nightly WebGL Build & Pages Deploy
+
+on:
+  schedule:
+    # 毎日 03:00 JST（= 前日 18:00 UTC）
+    - cron: "0 18 * * *"
+  workflow_dispatch: {}  # 手動実行も可能
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build WebGL with Unity (GameCI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+            lfs: true      # LFS の実体を取得
+            fetch-depth: 0
+
+      # Library キャッシュで時短（キーは適宜プロジェクト名などに）
+      - uses: actions/cache@v3
+        with:
+          path: Library
+          key: Library-WebGL-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-WebGL-
+
+      # WebGL ビルド（ProjectSettings/ProjectVersion.txt を自動検出）
+      - name: Build (WebGL)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: WebGL
+          # buildsPath: build      # 既定: build
+          # buildName: WebGL       # 既定: <targetPlatform> → WebGL
+
+      # Pages 用アーティファクトにパッケージング
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/WebGL   # unity-builder の既定出力: build/<targetPlatform>
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
