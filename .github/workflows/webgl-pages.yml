@@ -40,10 +40,20 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      # ★ 追加：index.html がある実ルートを自動検出して _site にコピー
+      - name: Prepare Pages content
+        run: |
+          set -e
+          ROOT=$(dirname "$(find build -maxdepth 3 -type f -name index.html | head -n 1)")
+          echo "Detected WebGL root: $ROOT"
+          rm -rf _site
+          mkdir -p _site
+          cp -a "$ROOT"/. _site/
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: build/WebGL   # ここに index.html があること
+          path: _site
 
   deploy:
     needs: build
