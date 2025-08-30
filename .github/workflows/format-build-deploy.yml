@@ -30,17 +30,18 @@ jobs:
       - run: dotnet tool update -g dotnet-format
       - run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
-      # ※ Unity リポに .sln/.csproj がない場合、format はスキップしても成功扱いにします
       - name: dotnet format (fix in place)
         run: |
-          set -o pipefail
-          OUT=$(dotnet format --verbosity minimal 2>&1 || true)
-          echo "$OUT"
-          if echo "$OUT" | grep -q "No solution or projects found"; then
+          set -e
+          # .sln / .csproj が無ければスキップ
+          if find . -type f \( -name "*.sln" -o -name "*.csproj" \) | grep -q .; then
+            echo "Running: dotnet format ."
+            dotnet format . --verbosity minimal
+          else
             echo "No .sln/.csproj found; skip dotnet format."
           fi
 
-      # 整形差分を任意でコミット＆プッシュ（[skip ci] で他WFの再起動を抑止）
+      # 整形差分を任意でコミット＆プッシュ（[skip ci] で他WFの起動を抑止）
       - name: Commit formatted files (optional)
         if: ${{ inputs.commitFormatted }}
         run: |
@@ -66,7 +67,7 @@ jobs:
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
           UNITY_EMAIL:   ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD:${{ secrets.UNITY_PASSWORD }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           targetPlatform: WebGL
 
@@ -74,7 +75,6 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # WebGL ルートを自動検出して _site 直下に配置（.nojekyll 付与）
       - name: Prepare Pages content
         run: |
           set -e
