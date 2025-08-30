@@ -1,0 +1,90 @@
+name: Manual Format + Build + Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      commitFormatted:
+        description: '整形差分を自動コミット＆プッシュする'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-manual
+  cancel-in-progress: false
+
+jobs:
+  format-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: true, fetch-depth: 0 }
+
+      # dotnet format（自動修正）
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - run: dotnet tool update -g dotnet-format
+      - run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+      - name: dotnet format (fix in place)
+        run: dotnet format --folder . --verbosity minimal
+
+      # 整形差分を任意でコミット＆プッシュ（PushトリガーWFがある場合に備え[skip ci]）
+      - name: Commit formatted files (optional)
+        if: ${{ inputs.commitFormatted }}
+        run: |
+          if ! git diff --quiet; then
+            BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: dotnet format [skip ci]"
+            git push origin "$BRANCH"
+          else
+            echo "No formatting changes to commit."
+          fi
+
+      # Unity ビルド（Library キャッシュ付き）
+      - uses: actions/cache@v3
+        with:
+          path: Library
+          key: Library-WebGL-${{ hashFiles('Assets/**','Packages/**','ProjectSettings/**') }}
+          restore-keys: Library-WebGL-
+
+      - name: Build (WebGL)
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: WebGL
+
+      # GitHub Pages へ配信準備（WebGL ルート自動検出 + .nojekyll）
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Prepare Pages content
+        run: |
+          set -e
+          ROOT=$(dirname "$(find build -maxdepth 3 -type f -name index.html | head -n 1)")
+          echo "Detected WebGL root: $ROOT"
+          rm -rf _site && mkdir -p _site
+          cp -a "$ROOT"/. _site/
+          touch _site/.nojekyll
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: format-build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
