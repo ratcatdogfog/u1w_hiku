@@ -1,4 +1,5 @@
 name: Manual Format + Build + Deploy
+
 on:
   workflow_dispatch:
     inputs:
@@ -23,30 +24,37 @@ jobs:
       - uses: actions/checkout@v4
         with: { lfs: true, fetch-depth: 0 }
 
-      # dotnet format（自動修正）
+      # ---- dotnet format（自動修正）----
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: '8.0.x' }
       - run: dotnet tool update -g dotnet-format
       - run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-      - name: dotnet format (fix in place)
-        run: dotnet format --folder . --verbosity minimal
 
-      # 整形差分を任意でコミット＆プッシュ（PushトリガーWFがある場合に備え[skip ci]）
+      # ※ Unity リポに .sln/.csproj がない場合、format はスキップしても成功扱いにします
+      - name: dotnet format (fix in place)
+        run: |
+          set -o pipefail
+          OUT=$(dotnet format --verbosity minimal 2>&1 || true)
+          echo "$OUT"
+          if echo "$OUT" | grep -q "No solution or projects found"; then
+            echo "No .sln/.csproj found; skip dotnet format."
+          fi
+
+      # 整形差分を任意でコミット＆プッシュ（[skip ci] で他WFの再起動を抑止）
       - name: Commit formatted files (optional)
         if: ${{ inputs.commitFormatted }}
         run: |
           if ! git diff --quiet; then
-            BRANCH=$(git rev-parse --abbrev-ref HEAD)
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add -A
             git commit -m "chore: dotnet format [skip ci]"
-            git push origin "$BRANCH"
+            git push origin "${{ github.ref_name }}"
           else
             echo "No formatting changes to commit."
           fi
 
-      # Unity ビルド（Library キャッシュ付き）
+      # ---- Unity WebGL ビルド ----
       - uses: actions/cache@v3
         with:
           path: Library
@@ -57,14 +65,16 @@ jobs:
         uses: game-ci/unity-builder@v4
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_EMAIL:   ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD:${{ secrets.UNITY_PASSWORD }}
         with:
           targetPlatform: WebGL
 
-      # GitHub Pages へ配信準備（WebGL ルート自動検出 + .nojekyll）
+      # ---- GitHub Pages へ配信準備 ----
       - name: Setup Pages
         uses: actions/configure-pages@v5
+
+      # WebGL ルートを自動検出して _site 直下に配置（.nojekyll 付与）
       - name: Prepare Pages content
         run: |
           set -e
@@ -73,6 +83,7 @@ jobs:
           rm -rf _site && mkdir -p _site
           cp -a "$ROOT"/. _site/
           touch _site/.nojekyll
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
